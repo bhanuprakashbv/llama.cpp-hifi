@@ -10,8 +10,14 @@
 #include "ggml-quants.h"
 #include "ggml-cpu-quants.h"
 #include "ggml-threading.h"
+#ifndef BARE_METAL_TEST
 #include "amx/amx.h"
+#endif
 #include "ggml.h"
+
+#ifdef BARE_METAL_TEST
+#include "xtensa_hifi.h"
+#endif
 
 #if defined(_MSC_VER) || defined(__MINGW32__)
 #include <malloc.h> // using malloc.h with MSC/MINGW
@@ -32,8 +38,10 @@
 #include <limits.h>
 #include <stdarg.h>
 #include <signal.h>
+#ifndef BARE_METAL_TEST
 #if defined(__gnu_linux__)
 #include <syscall.h>
+#endif
 #endif
 
 #ifdef GGML_USE_OPENMP
@@ -80,7 +88,9 @@
 #endif
 #endif // __has_feature
 
+#ifndef UNUSED
 #define UNUSED GGML_UNUSED
+#endif
 #define SWAP(x, y, T) do { T SWAP = x; (x) = y; (y) = SWAP; } while (0)
 
 #if defined(GGML_USE_ACCELERATE)
@@ -207,9 +217,11 @@ static int sched_yield (void) {
 }
 #else
 
+#if 1//ndef BARE_METAL_TEST
 #include <pthread.h>
 #include <stdatomic.h>
 #include <sched.h>
+#endif
 #if defined(__FreeBSD__)
 #include <pthread_np.h>
 #endif
@@ -222,7 +234,11 @@ typedef void * thread_ret_t;
 
 #endif
 
+#ifndef BARE_METAL_TEST
 typedef pthread_t ggml_thread_t;
+#else
+typedef void* ggml_thread_t;
+#endif
 
 #if defined(__APPLE__)
 #include <unistd.h>
@@ -1232,7 +1248,11 @@ static inline void __lsx_f16x4_store(ggml_fp16_t * x, __m128 y) {
 // Threading defs
 //
 
+#ifndef BARE_METAL_TEST
 typedef pthread_t          ggml_thread_t;
+#else
+typedef void* ggml_thread_t;
+#endif
 
 #if defined(_WIN32)
 
@@ -1256,6 +1276,7 @@ typedef SRWLOCK            ggml_mutex_t;
 
 #else
 
+#ifndef BARE_METAL_TEST
 typedef pthread_cond_t     ggml_cond_t;
 typedef pthread_mutex_t    ggml_mutex_t;
 
@@ -1265,6 +1286,17 @@ typedef pthread_mutex_t    ggml_mutex_t;
 #define ggml_mutex_unlock(m)        pthread_mutex_unlock(m)
 #define ggml_mutex_lock_shared(m)   pthread_mutex_lock(m)
 #define ggml_mutex_unlock_shared(m) pthread_mutex_unlock(m)
+#else
+typedef void*     ggml_cond_t;
+typedef void*    ggml_mutex_t;
+
+#define ggml_mutex_init(m)          UNUSED(m)
+#define ggml_mutex_destroy(m)       UNUSED(m)
+#define ggml_mutex_lock(m)          UNUSED(m)
+#define ggml_mutex_unlock(m)        UNUSED(m)
+#define ggml_mutex_lock_shared(m)   UNUSED(m)
+#define ggml_mutex_unlock_shared(m) UNUSED(m)
+#endif
 
 #define ggml_lock_init(x)    UNUSED(x)
 #define ggml_lock_destroy(x) UNUSED(x)
@@ -1276,10 +1308,17 @@ typedef pthread_mutex_t    ggml_mutex_t;
 #define ggml_lock_unlock(x)  UNUSED(x)
 
 #define GGML_LOCK_INITIALIZER 0
+#ifndef BARE_METAL_TEST
 #define ggml_cond_init(c)      pthread_cond_init(c, NULL)
 #define ggml_cond_destroy(c)   pthread_cond_destroy(c)
 #define ggml_cond_wait(c, m)   pthread_cond_wait(c, m)
 #define ggml_cond_broadcast(c) pthread_cond_broadcast(c)
+#else
+#define ggml_cond_init(c)      UNUSED(c)
+#define ggml_cond_destroy(c)   UNUSED(c)
+#define ggml_cond_wait(c, m)  UNUSED(c)
+#define ggml_cond_broadcast(c) UNUSED(c)
+#endif
 
 #define ggml_thread_create pthread_create
 #define ggml_thread_join   pthread_join
@@ -1339,6 +1378,8 @@ inline static void ggml_vec_cpy_i32(const int n, int32_t * y, const int32_t * x)
 
 inline static void ggml_vec_set_f16(const int n, ggml_fp16_t * x, const int32_t v) { for (int i = 0; i < n; ++i) x[i] = v; }
 inline static void ggml_vec_set_bf16(const int n, ggml_bf16_t * x, const ggml_bf16_t v) { for (int i = 0; i < n; ++i) x[i] = v; }
+
+#ifndef HIFI5S_OPT
 inline static void ggml_vec_add_f32 (const int n, float * z, const float * x, const float * y) { for (int i = 0; i < n; ++i) z[i]  = x[i] + y[i]; }
 inline static void ggml_vec_add1_f32(const int n, float * z, const float * x, const float   v) { for (int i = 0; i < n; ++i) z[i]  = x[i] + v;    }
 inline static void ggml_vec_acc_f32 (const int n, float * y, const float * x)                  { for (int i = 0; i < n; ++i) y[i] += x[i];        }
@@ -1349,7 +1390,104 @@ inline static void ggml_vec_cpy_f32 (const int n, float * y, const float * x)   
 inline static void ggml_vec_neg_f32 (const int n, float * y, const float * x)                  { for (int i = 0; i < n; ++i) y[i]  = -x[i];       }
 inline static void ggml_vec_mul_f32 (const int n, float * z, const float * x, const float * y) { for (int i = 0; i < n; ++i) z[i]  = x[i]*y[i];   }
 inline static void ggml_vec_div_f32 (const int n, float * z, const float * x, const float * y) { for (int i = 0; i < n; ++i) z[i]  = x[i]/y[i];   }
+#else
+inline static void ggml_vec_add_f32(const int n, float * z, const float * x, const float * y) {
+    xtfloatx4 *p_x4 = (xtfloatx4 *)x;
+    xtfloatx4 *p_y4 = (xtfloatx4 *)y;
+    xtfloatx4 *p_z4 = (xtfloatx4 *)z;
 
+    for (int i = 0; i < (n>>2); i++) {
+        p_z4[i] = p_x4[i] + p_y4[i];
+    }
+    for (int i = ((n>>2)<<2); i < n; i++) {
+        z[i] = x[i] + y[i];
+    }
+}
+
+inline static void ggml_vec_add1_f32(const int n, float * z, const float * x, const float   v) 
+{
+    xtfloat *px = (xtfloat *)x;
+    xtfloatx4 *p_x4 = (xtfloatx4 *)x;
+    xtfloatx4 vv = v;
+    xtfloatx4 *p_z4 = (xtfloatx4 *)z;
+
+    for (int i = 0; i < (n>>2); i++) {
+        p_z4[i] = p_x4[i] + vv;
+    }
+    for (int i = ((n>>2)<<2); i < n; i++) {
+        z[i] = x[i] + v;
+    }
+}
+inline static void ggml_vec_acc_f32 (const int n, float * y, const float * x)
+{
+    xtfloatx4 *p_x4 = (xtfloatx4 *)x;
+    xtfloatx4 *p_y4 = (xtfloatx4 *)y;
+
+    for (int i = 0; i < (n>>2); i++) {
+        p_y4[i] = p_x4[i] + p_y4[i];
+    }
+    for (int i = ((n>>2)<<2); i < n; i++) {
+        y[i] = x[i] + y[i];
+    }
+}
+inline static void ggml_vec_acc1_f32(const int n, float * y, const float   v)
+{ 
+    xtfloatx4 vv = v;
+    xtfloatx4 *p_y4 = (xtfloatx4 *)y;
+
+    for (int i = 0; i < (n>>2); i++) {
+        p_y4[i] = vv + p_y4[i];
+    }
+    for (int i = ((n>>2)<<2); i < n; i++) {
+        y[i] = v + y[i];
+    }
+}
+inline static void ggml_vec_sub_f32(const int n, float * z, const float * x, const float * y) {
+    xtfloatx4 *p_x4 = (xtfloatx4 *)x;
+    xtfloatx4 *p_y4 = (xtfloatx4 *)y;
+    xtfloatx4 *p_z4 = (xtfloatx4 *)z;
+    
+    for (int i = 0; i < (n>>2); i++) {
+        p_z4[i] = p_x4[i] - p_y4[i];
+    }
+    for (int i = ((n>>2)<<2); i < n; i++) {
+        z[i] = x[i] - y[i];
+    }
+}
+inline static void ggml_vec_set_f32 (const int n, float * x, const float   v)                  { for (int i = 0; i < n; ++i) x[i]  = v;           }
+inline static void ggml_vec_cpy_f32 (const int n, float * y, const float * x)
+{ 
+    //for (int i = 0; i < n; ++i) y[i]  = x[i];
+    memcpy(y, x, n * sizeof(float));
+}
+//inline static void ggml_vec_neg_f32 (const int n, float * y, const float * x)                  { for (int i = 0; i < n; ++i) y[i]  = -x[i];       }
+inline static void ggml_vec_neg_f32 (const int n, float * y, const float * x) {
+    xtfloatx4 *p_x4 = (xtfloatx4 *)x;
+    xtfloatx4 *p_y4 = (xtfloatx4 *)y;
+    
+    for (int i = 0; i < (n>>2); i++) {
+        p_y4[i] = -p_x4[i];
+    }
+    for (int i = ((n>>2)<<2); i < n; i++) {
+        y[i] = -x[i];
+    }
+}
+inline static void ggml_vec_mul_f32(const int n, float * z, const float * x, const float * y) {
+    xtfloatx4 *p_x4 = (xtfloatx4 *)x;
+    xtfloatx4 *p_y4 = (xtfloatx4 *)y;
+    xtfloatx4 *p_z4 = (xtfloatx4 *)z;
+    
+    for (int i = 0; i < (n>>2); i++) {
+        p_z4[i] = p_x4[i] * p_y4[i];
+    }
+    for (int i = ((n>>2)<<2); i < n; i++) {
+        z[i] = x[i] * y[i];
+    }
+}
+inline static void ggml_vec_div_f32 (const int n, float * z, const float * x, const float * y) { for (int i = 0; i < n; ++i) z[i]  = x[i]/y[i];   }
+#endif // HIFI5_OPT
+
+#if !defined(HIFI5S_OPT) && !defined(HIFIIQ_VEC_DOT_F32)
 static void ggml_vec_dot_f32(int n, float * restrict s, size_t bs, const float * restrict x, size_t bx, const float * restrict y, size_t by, int nrc) {
    assert(nrc == 1);
    UNUSED(nrc);
@@ -1392,6 +1530,99 @@ static void ggml_vec_dot_f32(int n, float * restrict s, size_t bs, const float *
 
     *s = sumf;
 }
+#endif
+#if defined(HIFIIQ_VEC_DOT_F32)
+static void ggml_vec_dot_f32(int n, float * restrict s, size_t bs, const float * restrict x, size_t bx, const float * restrict y, size_t by, int nrc) {
+   assert(nrc == 1);
+   UNUSED(nrc);
+   UNUSED(bx);
+   UNUSED(by);
+   UNUSED(bs);
+
+    const int VEC_ELEMS = 8;
+    const int STEP      = VEC_ELEMS * 4;
+
+    const int np4 = (n / STEP)      * STEP;
+    const int np1 = (n / VEC_ELEMS) * VEC_ELEMS;
+
+    xb_vecN_2xf32 acc0 = AE_ZERON_2XF32();
+    xb_vecN_2xf32 acc1 = AE_ZERON_2XF32();
+    xb_vecN_2xf32 acc2 = AE_ZERON_2XF32();
+    xb_vecN_2xf32 acc3 = AE_ZERON_2XF32();
+
+    const xb_vecN_2xf32 *px = (const xb_vecN_2xf32 *)x;
+    const xb_vecN_2xf32 *py = (const xb_vecN_2xf32 *)y;
+    valign align_x = AE_LAN_2XF32_PP(px);
+    valign align_y = AE_LAN_2XF32_PP(py);
+
+    xb_vecN_2xf32 vx0, vx1, vx2, vx3;
+    xb_vecN_2xf32 vy0, vy1, vy2, vy3;
+
+#pragma ymemory(py)
+    for (int i = 0; i < np4; i += STEP) {
+        AE_LAN_2XF32_IP(vx0, align_x, px);
+        AE_LAN_2XF32_IP(vy0, align_y, py);
+        AE_MULAN_2XF32(acc0, vx0, vy0);
+
+        AE_LAN_2XF32_IP(vx1, align_x, px);
+        AE_LAN_2XF32_IP(vy1, align_y, py);
+        AE_MULAN_2XF32(acc1, vx1, vy1);
+
+        AE_LAN_2XF32_IP(vx2, align_x, px);
+        AE_LAN_2XF32_IP(vy2, align_y, py);
+        AE_MULAN_2XF32(acc2, vx2, vy2);
+
+        AE_LAN_2XF32_IP(vx3, align_x, px);
+        AE_LAN_2XF32_IP(vy3, align_y, py);
+        AE_MULAN_2XF32(acc3, vx3, vy3);
+    }
+
+#pragma ymemory(py)
+    for (int i = np4; i < np1; i += VEC_ELEMS) {
+        AE_LAN_2XF32_IP(vx0, align_x, px);
+        AE_LAN_2XF32_IP(vy0, align_y, py);
+        AE_MULAN_2XF32(acc0, vx0, vy0);
+    }
+
+    // Tree-reduce 4 accumulators → 1, then horizontal sum
+    xb_vecN_2xf32 sum01   = AE_ADDN_2XF32(acc0, acc1);
+    xb_vecN_2xf32 sum23   = AE_ADDN_2XF32(acc2, acc3);
+    xb_vecN_2xf32 sum_all = AE_ADDN_2XF32(sum01, sum23);
+    float sumf = AE_RADDN_2XF32(sum_all);
+
+    // Scalar tail: remaining < 8 elements
+    for (int i = np1; i < n; ++i) {
+        sumf += x[i] * y[i];
+    }
+
+    *s = sumf;
+}
+#endif
+#if defined(HIFI5S_OPT)
+static void ggml_vec_dot_f32(int n, float * restrict s, size_t bs, const float * restrict x, size_t bx, const float * restrict y, size_t by, int nrc) {
+    assert(nrc == 1);
+    UNUSED(nrc);
+    UNUSED(bx);
+    UNUSED(by);
+    UNUSED(bs);
+
+    xtfloatx4 sumfx4 = ZERO_SX4();
+    xtfloatx4 *p_x4 = (xtfloatx4 *)x;
+    xtfloatx4 *p_y4 = (xtfloatx4 *)y;
+
+    for (int i = 0; i < (n>>2); i++) {
+        MADD_SX4(sumfx4, p_x4[i], p_y4[i]);
+    }
+    xtfloat sumf = RADD_SX4(sumfx4);
+
+    // handle remaining elements
+    for (int i = ((n>>2)<<2); i < n; i++) {
+        xthalf d_x, d_y;
+        MADD_S(sumf, x[i], y[i]);
+    }
+    xtfloat_storei(sumf, s, 0);
+}
+#endif
 
 static void ggml_vec_dot_bf16(int n, float * restrict s, size_t bs, ggml_bf16_t * restrict x, size_t bx, ggml_bf16_t * restrict y, size_t by, int nrc) {
     assert(nrc == 1);
@@ -1461,6 +1692,7 @@ static void ggml_vec_dot_bf16(int n, float * restrict s, size_t bs, ggml_bf16_t 
     *s = sumf;
 }
 
+#if !defined(HIFI5S_OPT) && !defined(HIFIIQ_VEC_DOT_F16)
 static void ggml_vec_dot_f16(int n, float * restrict s, size_t bs, ggml_fp16_t * restrict x, size_t bx, ggml_fp16_t * restrict y, size_t by, int nrc) {
     assert(nrc == 1);
     UNUSED(nrc);
@@ -1502,6 +1734,157 @@ static void ggml_vec_dot_f16(int n, float * restrict s, size_t bs, ggml_fp16_t *
 
     *s = sumf;
 }
+#endif
+#if defined(HIFIIQ_VEC_DOT_F16)
+static void ggml_vec_dot_f16(int n, float * restrict s, size_t bs, ggml_fp16_t * restrict x, size_t bx, ggml_fp16_t * restrict y, size_t by, int nrc) {
+    assert(nrc == 1);
+    UNUSED(nrc);
+    UNUSED(bx);
+    UNUSED(by);
+    UNUSED(bs);
+
+#ifdef HIFIIQ_SCALAR
+    // Scalar XT_MADD_H path:
+    //   IN   x, y     ggml_fp16_t* → cast to xb_f16* (same IEEE 754 FP16 bits, no conversion needed)
+    //   ACC  sum_h    xb_f16 (FP16 scalar in lane 0 of vector register)
+    //   MACC XT_MADD_H  sum_h += p_x[i] * p_y[i], native FP16 FMA, no table lookup
+    //   OUT  *s = (float)((_Float16)sum_h)
+    //
+    // Schedule: ~1 elem/cycle, II≈4 (MAC recurrence latency on scalar pipe).
+    // Better than REFC (no 256KB ggml_table_f32_f16 lookup), comparable to HIFI5 MADD_S.
+    // 16× slower than vectorized #else branch (AE_MULANXF16 II=4, 16 elem/iter).
+    // Use for debugging, correctness comparison, or when full vector path unavailable.
+    xb_f16 *p_x = (xb_f16 *)x;
+    xb_f16 *p_y = (xb_f16 *)y;
+    xb_f16 sum_h = XT_CONST_H(0);    // 0.0 in FP16 via immediate
+    for (int i = 0; i < n; ++i) {
+        XT_MADD_H(sum_h, p_x[i], p_y[i]);
+    }
+    *s = (float)((_Float16)sum_h);
+#else
+    const int VEC_ELEMS = 16;
+    const int VEC_BYTES = VEC_ELEMS * 2;           // 32 bytes per xb_vecNxf16
+    const int STEP      = VEC_ELEMS * 4;           // 64 elements per 4-way iteration
+
+    const int np4 = (n / STEP)      * STEP;        // floor to multiple of 64
+    const int np1 = (n / VEC_ELEMS) * VEC_ELEMS;   // floor to multiple of 16
+
+    // FP16 multiply-and-accumulate into a FP16 accumulator overflows / loses
+    // mantissa precision on large dot products (FP16 range ±65504, 10-bit
+    // mantissa), diverging model outputs from the F32 reference. Instead we
+    // widen each F16 input to F32 and perform both the multiply and the
+    // accumulation in F32 (AE_MULAN_2XF32), exactly matching the reference
+    // computation sumf += (float)x[i] * (float)y[i].
+    //
+    // Each xb_vecNxf16 holds 16 F16 lanes; AE_CVTF32NXF16_0/_1 widen the two
+    // 8-lane halves into xb_vecN_2xf32. The 4-way unroll therefore feeds 8
+    // independent F32 accumulator chains, preserving (and slightly improving)
+    // the instruction-level parallelism of the original FP16 path.
+    xb_vecN_2xf32 facc0 = AE_ZERON_2XF32();
+    xb_vecN_2xf32 facc1 = AE_ZERON_2XF32();
+    xb_vecN_2xf32 facc2 = AE_ZERON_2XF32();
+    xb_vecN_2xf32 facc3 = AE_ZERON_2XF32();
+    xb_vecN_2xf32 facc4 = AE_ZERON_2XF32();
+    xb_vecN_2xf32 facc5 = AE_ZERON_2XF32();
+    xb_vecN_2xf32 facc6 = AE_ZERON_2XF32();
+    xb_vecN_2xf32 facc7 = AE_ZERON_2XF32();
+
+    // Prime alignment registers once — resolves pointer misalignment offset for all loads
+    xb_vecNxf16 *px = (xb_vecNxf16 *)x;
+    xb_vecNxf16 *py = (xb_vecNxf16 *)y;
+    valign align_x = AE_LANXF16_PP(px);
+    valign align_y = AE_LANXF16_PP(py);
+
+    xb_vecNxf16 vx0, vx1, vx2, vx3;
+    xb_vecNxf16 vy0, vy1, vy2, vy3;
+
+    // #pragma ymemory pins py to Y-memory port; px uses X-memory port by default.
+    // Two separate memory ports → x and y loads issue in parallel each cycle.
+    // This gives the SWP freedom to dual-issue load(x) + load(y) in the same slot,
+    // achieving the II=4 resource-bound minimum (8 loads / 2 ports/cycle = 4 cycles).
+#pragma ymemory(py)
+    for (int i = 0; i < np4; i += STEP) {
+        AE_LAVNXF16_XP(vx0, align_x, px, VEC_BYTES);
+        AE_LAVNXF16_XP(vy0, align_y, py, VEC_BYTES);
+        AE_MULAN_2XF32(facc0, AE_CVTF32NXF16_0(vx0), AE_CVTF32NXF16_0(vy0));
+        AE_MULAN_2XF32(facc1, AE_CVTF32NXF16_1(vx0), AE_CVTF32NXF16_1(vy0));
+
+        AE_LAVNXF16_XP(vx1, align_x, px, VEC_BYTES);
+        AE_LAVNXF16_XP(vy1, align_y, py, VEC_BYTES);
+        AE_MULAN_2XF32(facc2, AE_CVTF32NXF16_0(vx1), AE_CVTF32NXF16_0(vy1));
+        AE_MULAN_2XF32(facc3, AE_CVTF32NXF16_1(vx1), AE_CVTF32NXF16_1(vy1));
+
+        AE_LAVNXF16_XP(vx2, align_x, px, VEC_BYTES);
+        AE_LAVNXF16_XP(vy2, align_y, py, VEC_BYTES);
+        AE_MULAN_2XF32(facc4, AE_CVTF32NXF16_0(vx2), AE_CVTF32NXF16_0(vy2));
+        AE_MULAN_2XF32(facc5, AE_CVTF32NXF16_1(vx2), AE_CVTF32NXF16_1(vy2));
+
+        AE_LAVNXF16_XP(vx3, align_x, px, VEC_BYTES);
+        AE_LAVNXF16_XP(vy3, align_y, py, VEC_BYTES);
+        AE_MULAN_2XF32(facc6, AE_CVTF32NXF16_0(vx3), AE_CVTF32NXF16_0(vy3));
+        AE_MULAN_2XF32(facc7, AE_CVTF32NXF16_1(vx3), AE_CVTF32NXF16_1(vy3));
+    }
+
+    // Cleanup: 0–3 remaining 16-element chunks (same port separation as main loop)
+#pragma ymemory(py)
+    for (int i = np4; i < np1; i += VEC_ELEMS) {
+        AE_LAVNXF16_XP(vx0, align_x, px, VEC_BYTES);
+        AE_LAVNXF16_XP(vy0, align_y, py, VEC_BYTES);
+        AE_MULAN_2XF32(facc0, AE_CVTF32NXF16_0(vx0), AE_CVTF32NXF16_0(vy0));
+        AE_MULAN_2XF32(facc1, AE_CVTF32NXF16_1(vx0), AE_CVTF32NXF16_1(vy0));
+    }
+
+    // Tree-reduce 8 F32 accumulators → 1 (3 levels, 7 adds)
+    facc0 = AE_ADDN_2XF32(facc0, facc1);
+    facc2 = AE_ADDN_2XF32(facc2, facc3);
+    facc4 = AE_ADDN_2XF32(facc4, facc5);
+    facc6 = AE_ADDN_2XF32(facc6, facc7);
+    facc0 = AE_ADDN_2XF32(facc0, facc2);
+    facc4 = AE_ADDN_2XF32(facc4, facc6);
+    facc0 = AE_ADDN_2XF32(facc0, facc4);
+
+    // Horizontal reduce: 8 F32 lanes → scalar
+    float sumf = AE_RADDN_2XF32(facc0);
+
+    // Scalar tail: remaining < 16 elements
+    _Float16 * restrict p_x = (_Float16 *)x;
+    _Float16 * restrict p_y = (_Float16 *)y;
+    for (int i = np1; i < n; ++i) {
+        sumf += (float)p_x[i] * (float)p_y[i];
+    }
+
+    *s = sumf;
+#endif /* HIFIIQ_SCALAR */
+}
+#endif
+#if defined(HIFI5S_OPT)
+static void ggml_vec_dot_f16(int n, float * restrict s, size_t bs, ggml_fp16_t * restrict x, size_t bx, ggml_fp16_t * restrict y, size_t by, int nrc) {
+    assert(nrc == 1);
+    UNUSED(nrc);
+    UNUSED(bx);
+    UNUSED(by);
+    UNUSED(bs);
+
+    xtfloatx4 sumfx4 = ZERO_SX4();
+    xthalfx4 *p_x4 = (xthalfx4 *)x;
+    xthalfx4 *p_y4 = (xthalfx4 *)y;
+
+    for (int i = 0; i < (n>>2); i++) {
+        //xthalfx4_loadip(d_x4, p_x4, 8);
+        //xthalfx4_loadip(d_y4, p_y4, 8);
+        MADD_SX4(sumfx4, xthalfx4_rtor_xtfloatx4(p_x4[i]),
+                        xthalfx4_rtor_xtfloatx4(p_y4[i]));
+    }
+    xtfloat sumf = RADD_SX4(sumfx4);
+
+    // handle remaining elements
+    for (int i = ((n>>2)<<2); i < n; i++) {
+        xthalf d_x, d_y;
+        MADD_S(sumf, xthalf_rtor_xtfloat(x[i]), xthalf_rtor_xtfloat(y[i]));
+    }
+    xtfloat_storei(sumf, s, 0);
+}
+#endif
 
 // compute GGML_VEC_DOT_UNROLL dot products at once
 // xs - x row stride in bytes
@@ -2216,8 +2599,12 @@ struct ggml_numa_nodes {
     uint32_t n_nodes;
     uint32_t total_cpus; // hardware threads on system
     uint32_t current_node; // node on which main process is execting
+#ifndef BARE_METAL_TEST
 #if defined(__gnu_linux__)
     cpu_set_t cpuset; // cpuset from numactl
+#else
+    uint32_t cpuset; // no NUMA support outside of Linux at this time. Use a portable datatype
+#endif
 #else
     uint32_t cpuset; // no NUMA support outside of Linux at this time. Use a portable datatype
 #endif
@@ -2233,6 +2620,7 @@ struct ggml_state {
 
 static struct ggml_state g_state = {0};
 
+#ifndef BARE_METAL_TEST
 void ggml_barrier(struct ggml_threadpool * tp) {
     int n_threads = atomic_load_explicit(&tp->n_threads_cur, memory_order_relaxed);
     if (n_threads == 1) {
@@ -2270,7 +2658,11 @@ void ggml_barrier(struct ggml_threadpool * tp) {
     #endif
 #endif
 }
+#else
+#define ggml_barrier(m)
+#endif
 
+#ifndef BARE_METAL_TEST
 #if defined(__gnu_linux__)
 static cpu_set_t ggml_get_numa_affinity(void) {
     cpu_set_t cpuset;
@@ -2285,6 +2677,11 @@ static uint32_t ggml_get_numa_affinity(void) {
     return 0; // no NUMA support
 }
 #endif
+#else
+static uint32_t ggml_get_numa_affinity(void) {
+    return 0; // no NUMA support
+}
+#endif
 
 void ggml_numa_init(enum ggml_numa_strategy numa_flag) {
     if (g_state.numa.n_nodes > 0) {
@@ -2293,6 +2690,7 @@ void ggml_numa_init(enum ggml_numa_strategy numa_flag) {
         return;
     }
 
+#ifndef BARE_METAL_TEST
 #if defined(__gnu_linux__)
     struct stat st;
     char path[256];
@@ -2371,6 +2769,7 @@ void ggml_numa_init(enum ggml_numa_strategy numa_flag) {
 #else
     UNUSED(numa_flag);
     // TODO
+#endif
 #endif
 }
 
@@ -7284,7 +7683,7 @@ static void ggml_compute_forward_group_norm(
 }
 
 // ggml_compute_forward_mul_mat
-
+#if !defined(HIFI5S_OPT)
 static void ggml_compute_forward_mul_mat_one_chunk(
     const struct ggml_compute_params * params,
     struct ggml_tensor * dst,
@@ -7374,7 +7773,9 @@ static void ggml_compute_forward_mul_mat_one_chunk(
         }
     }
 }
+#endif
 
+#if !defined(HIFI5S_OPT) && !defined(HIFIIQ_MUL_MAT)
 static void ggml_compute_forward_mul_mat(
         const struct ggml_compute_params * params,
               struct ggml_tensor * dst) {
@@ -7553,6 +7954,1046 @@ UseGgmlGemm2:;
         current_chunk = atomic_fetch_add_explicit(&params->threadpool->current_chunk, 1, memory_order_relaxed);
     }
 }
+#endif
+#if defined(HIFIIQ_OPT)
+#ifdef HIFIIQ_MATMUL_Q8_V2
+// Q8_0 matmul kernel using OA4 MMA with broadcast, vector FP accumulation,
+// and 4-row batching. Fast paths for ne00==32, ne00==64, streaming for ne00>64.
+
+static inline void ggml_compute_forward_mul_mat_one_chunk_q8(
+    const struct ggml_compute_params * params,
+    struct ggml_tensor * dst,
+    const enum ggml_type vec_dot_type,
+    const int num_rows_per_vec_dot,
+    const int ir0_start,
+    const int ir0_end,
+    const int ir1_start,
+    const int ir1_end) {
+
+    const struct ggml_tensor * src0 = dst->src[0];
+    const struct ggml_tensor * src1 = dst->src[1];
+
+    GGML_TENSOR_BINARY_OP_LOCALS
+
+    const bool src1_cont = ggml_is_contiguous(src1);
+
+    // broadcast factors
+    const int r2 = ne12 / ne02;
+    const int r3 = ne13 / ne03;
+
+    if (ir0_start >= ir0_end || ir1_start >= ir1_end)
+        return;
+
+    bool wdata_is_src1 = src1->type == vec_dot_type;
+    const void * wdata = wdata_is_src1 ? src1->data : params->wdata;
+    const size_t row_size = ggml_row_size(vec_dot_type, ne10);
+
+    assert(ne12 % ne02 == 0);
+    assert(ne13 % ne03 == 0);
+
+    const int blck_0 = 16;
+    const int blck_1 = 16;
+
+    const size_t src1_col_stride = src1_cont || !wdata_is_src1 ? row_size : nb11;
+
+    float tmp[32];
+
+    int ne12ne1       = ne12 * ne1;
+    float byr3        = 1.0f / (float)r3;
+    float byr2        = 1.0f / (float)r2;
+    float byne12ne1   = 1.0f / (float)(ne12 * ne1);
+    float byne1       = 1.0f / (float)ne1;
+
+    const int nb = ne00 / QK8_0;
+
+    xb_vec2Nx8 zeros = AE_ZERO2NX8();
+
+    AE_MOVZBV((xb_vecNx16)0);
+    AE_MOVZBIASCV(0);
+
+    for (int iir1 = ir1_start; iir1 < ir1_end; iir1 += blck_1) {
+        for (int iir0 = ir0_start; iir0 < ir0_end; iir0 += blck_0) {
+            for (int ir1 = iir1; ir1 < iir1 + blck_1 && ir1 < ir1_end; ir1 += 1) {
+
+                const int i13 = (int)((float)ir1 * byne12ne1);
+                const int i12 = (int)(((float)ir1 - (float)(i13 * ne12ne1)) * byne1);
+                const int i11 = ir1 - i13 * ne12ne1 - i12 * ne1;
+
+                const int i03 = (int)((float)i13 * byr3);
+                const int i02 = (int)((float)i12 * byr2);
+
+                const char * src0_row = (const char*)src0->data + (i02 * nb02 + i03 * nb03);
+
+                const char * src1_col = (const char*)wdata +
+                    (src1_cont || !wdata_is_src1
+                        ? (i11 + i12 * ne11 + i13 * ne12 * ne11) * row_size
+                        : (i11 * nb11 + i12 * nb12 + i13 * nb13));
+
+                float * dst_col = (float*)((char*)dst->data + (i11 * nb1 + i12 * nb2 + i13 * nb3));
+
+                int memcpy_size = (MIN(iir0 + blck_0, ir0_end) - iir0) * (int)sizeof(float);
+                int loopcnt = MIN(iir0 + blck_0, ir0_end);
+                xtfloat *pout = (xtfloat *)tmp;
+
+                if (ne00 == 32) {
+                    xb_f16 *y_ptr = (xb_f16 *)src1_col;
+                    xb_f16 yh;
+                    xb_f16_loadip(yh, y_ptr, 2);
+                    xtfloat dy = AE_CVTF32F16(yh);
+
+                    xb_vec2Nx8 yraw;
+                    xb_vec2Nx8 *yv = (xb_vec2Nx8 *)(void *)y_ptr;
+                    AE_L2U2NX8_XP(yraw, yv, 32);
+
+                    xb_vec2Nx8 yi0 = yraw, yi1 = yraw, yi2 = yraw, yi3 = yraw;
+                    AE_INTL64Q2NX8(yi3, yi2, yi1, yi0,
+                                    yi3, yi2, yi1, yi0);
+
+                    int ir0;
+                    for (ir0 = iir0; ir0 + 4 <= loopcnt; ir0 += 4) {
+                        xtfloat dx_f[4];
+                        xb_vec2Nx8 w[4];
+                        for (int r = 0; r < 4; r++) {
+                            xb_f16 *wp = (xb_f16 *)(src0_row + (ir0 + r) * nb01);
+                            xb_f16 wh;
+                            xb_f16_loadip(wh, wp, 2);
+                            dx_f[r] = AE_CVTF32F16(wh);
+                            AE_L2U2NX8_XP(w[r], (xb_vec2Nx8 *)wp, 32);
+                        }
+
+                        AE_INTL64Q2NX8(w[3], w[2], w[1], w[0],
+                                        w[3], w[2], w[1], w[0]);
+
+                        xb_vec2Nx32w wvt = AE_ZERO2NX32W();
+                        AE_MMA8A8OA4X8X8HT(wvt, w[0], yi0, yi0);
+                        AE_MMA8A8OA4X8X8HT(wvt, w[1], yi1, yi1);
+                        AE_MMA8A8OA4X8X8HT(wvt, w[2], yi2, yi2);
+                        AE_MMA8A8OA4X8X8HT(wvt, w[3], yi3, yi3);
+
+                        xb_vecN_2x32v r01_lo, r01_hi, r23_lo, r23_hi;
+                        AE_MOV2VWL(r01_hi, r01_lo, wvt);
+                        AE_MOV2VWH(r23_hi, r23_lo, wvt);
+
+                        xb_vecN_2xf32 frow0 = AE_FLOATN_2X32(r01_lo, 0);
+                        xb_vecN_2xf32 frow1 = AE_FLOATN_2X32(r01_hi, 0);
+                        xb_vecN_2xf32 frow2 = AE_FLOATN_2X32(r23_lo, 0);
+                        xb_vecN_2xf32 frow3 = AE_FLOATN_2X32(r23_hi, 0);
+                        xb_vecN_2xf32 scv0 = AE_MOVN_2XF32_FROMF32(XT_MUL_S(dx_f[0], dy));
+                        xb_vecN_2xf32 scv1 = AE_MOVN_2XF32_FROMF32(XT_MUL_S(dx_f[1], dy));
+                        xb_vecN_2xf32 scv2 = AE_MOVN_2XF32_FROMF32(XT_MUL_S(dx_f[2], dy));
+                        xb_vecN_2xf32 scv3 = AE_MOVN_2XF32_FROMF32(XT_MUL_S(dx_f[3], dy));
+                        xb_vecN_2xf32 res0 = AE_MULN_2XF32(frow0, scv0);
+                        xb_vecN_2xf32 res1 = AE_MULN_2XF32(frow1, scv1);
+                        xb_vecN_2xf32 res2 = AE_MULN_2XF32(frow2, scv2);
+                        xb_vecN_2xf32 res3 = AE_MULN_2XF32(frow3, scv3);
+                        xtfloat_storexp(AE_MOVF32_FROMN_2XF32(res0), pout, 4);
+                        xtfloat_storexp(AE_MOVF32_FROMN_2XF32(res1), pout, 4);
+                        xtfloat_storexp(AE_MOVF32_FROMN_2XF32(res2), pout, 4);
+                        xtfloat_storexp(AE_MOVF32_FROMN_2XF32(res3), pout, 4);
+                    }
+
+                    // ≤3 row tail
+                    for (; ir0 < loopcnt; ir0++) {
+                        xb_f16 *wp = (xb_f16 *)(src0_row + ir0 * nb01);
+                        xb_f16 wh;
+                        xb_f16_loadip(wh, wp, 2);
+                        xtfloat dx_fs = AE_CVTF32F16(wh);
+
+                        xb_vec2Nx8 w0;
+                        AE_L2U2NX8_XP(w0, (xb_vec2Nx8 *)wp, 32);
+
+                        xb_vec2Nx8 ww0 = w0, ww1 = zeros, ww2 = zeros, ww3 = zeros;
+                        AE_INTL64Q2NX8(ww3, ww2, ww1, ww0,
+                                        ww3, ww2, ww1, ww0);
+
+                        xb_vec2Nx32w wvt = AE_ZERO2NX32W();
+                        AE_MMA8A8OA4X8X8HT(wvt, ww0, yi0, yi0);
+                        AE_MMA8A8OA4X8X8HT(wvt, ww1, yi1, yi1);
+                        AE_MMA8A8OA4X8X8HT(wvt, ww2, yi2, yi2);
+                        AE_MMA8A8OA4X8X8HT(wvt, ww3, yi3, yi3);
+
+                        xb_vecN_2x32v r01_lo, r01_hi;
+                        AE_MOV2VWL(r01_hi, r01_lo, wvt);
+                        xb_vecN_2xf32 frow = AE_FLOATN_2X32(r01_lo, 0);
+                        xb_vecN_2xf32 scv = AE_MOVN_2XF32_FROMF32(XT_MUL_S(dx_fs, dy));
+                        xb_vecN_2xf32 res = AE_MULN_2XF32(frow, scv);
+                        xtfloat_storexp(AE_MOVF32_FROMN_2XF32(res), pout, 4);
+                    }
+                }
+                else if (ne00 == 64) {
+                    xb_f16 *y_ptr = (xb_f16 *)src1_col;
+                    xtfloat dy_scale[2];
+                    xb_vec2Nx8 yi[8]; // yi[0..3]=block0, yi[4..7]=block1
+
+                    for (int b = 0; b < 2; b++) {
+                        xb_f16 yh;
+                        xb_f16_loadip(yh, y_ptr, 2);
+                        dy_scale[b] = AE_CVTF32F16(yh);
+
+                        xb_vec2Nx8 yraw;
+                        AE_L2U2NX8_XP(yraw, (xb_vec2Nx8 *)y_ptr, 32);
+
+                        int off = b * 4;
+                        yi[off+0] = yraw; yi[off+1] = yraw;
+                        yi[off+2] = yraw; yi[off+3] = yraw;
+                        AE_INTL64Q2NX8(yi[off+3], yi[off+2], yi[off+1], yi[off+0],
+                                        yi[off+3], yi[off+2], yi[off+1], yi[off+0]);
+                    }
+
+                    int ir0;
+                    for (ir0 = iir0; ir0 + 4 <= loopcnt; ir0 += 4) {
+                        xb_vecN_2xf32 sumf_v0 = AE_ZERON_2XF32();
+                        xb_vecN_2xf32 sumf_v1 = AE_ZERON_2XF32();
+                        xb_vecN_2xf32 sumf_v2 = AE_ZERON_2XF32();
+                        xb_vecN_2xf32 sumf_v3 = AE_ZERON_2XF32();
+
+                        xb_f16 *wp[4];
+                        for (int r = 0; r < 4; r++)
+                            wp[r] = (xb_f16 *)(src0_row + (ir0 + r) * nb01);
+
+                        for (int b = 0; b < 2; b++) {
+                            xtfloat dx_f[4];
+                            xb_vec2Nx8 w[4];
+                            for (int r = 0; r < 4; r++) {
+                                xb_f16 wh;
+                                xb_f16_loadip(wh, wp[r], 2);
+                                dx_f[r] = AE_CVTF32F16(wh);
+                                AE_L2U2NX8_XP(w[r], (xb_vec2Nx8 *)wp[r], 32);
+                            }
+
+                            AE_INTL64Q2NX8(w[3], w[2], w[1], w[0],
+                                            w[3], w[2], w[1], w[0]);
+
+                            int off = b * 4;
+                            xb_vec2Nx32w wvt = AE_ZERO2NX32W();
+                            AE_MMA8A8OA4X8X8HT(wvt, w[0], yi[off+0], yi[off+0]);
+                            AE_MMA8A8OA4X8X8HT(wvt, w[1], yi[off+1], yi[off+1]);
+                            AE_MMA8A8OA4X8X8HT(wvt, w[2], yi[off+2], yi[off+2]);
+                            AE_MMA8A8OA4X8X8HT(wvt, w[3], yi[off+3], yi[off+3]);
+
+                            xb_vecN_2x32v r01_lo, r01_hi, r23_lo, r23_hi;
+                            AE_MOV2VWL(r01_hi, r01_lo, wvt);
+                            AE_MOV2VWH(r23_hi, r23_lo, wvt);
+
+                            xb_vecN_2xf32 frow0 = AE_FLOATN_2X32(r01_lo, 0);
+                            xb_vecN_2xf32 frow1 = AE_FLOATN_2X32(r01_hi, 0);
+                            xb_vecN_2xf32 frow2 = AE_FLOATN_2X32(r23_lo, 0);
+                            xb_vecN_2xf32 frow3 = AE_FLOATN_2X32(r23_hi, 0);
+
+                            xtfloat dy_e = dy_scale[b];
+                            xb_vecN_2xf32 scv0 = AE_MOVN_2XF32_FROMF32(XT_MUL_S(dx_f[0], dy_e));
+                            xb_vecN_2xf32 scv1 = AE_MOVN_2XF32_FROMF32(XT_MUL_S(dx_f[1], dy_e));
+                            xb_vecN_2xf32 scv2 = AE_MOVN_2XF32_FROMF32(XT_MUL_S(dx_f[2], dy_e));
+                            xb_vecN_2xf32 scv3 = AE_MOVN_2XF32_FROMF32(XT_MUL_S(dx_f[3], dy_e));
+
+                            AE_MULAN_2XF32(sumf_v0, frow0, scv0);
+                            AE_MULAN_2XF32(sumf_v1, frow1, scv1);
+                            AE_MULAN_2XF32(sumf_v2, frow2, scv2);
+                            AE_MULAN_2XF32(sumf_v3, frow3, scv3);
+                        }
+
+                        xtfloat_storexp(AE_MOVF32_FROMN_2XF32(sumf_v0), pout, 4);
+                        xtfloat_storexp(AE_MOVF32_FROMN_2XF32(sumf_v1), pout, 4);
+                        xtfloat_storexp(AE_MOVF32_FROMN_2XF32(sumf_v2), pout, 4);
+                        xtfloat_storexp(AE_MOVF32_FROMN_2XF32(sumf_v3), pout, 4);
+                    }
+
+                    // ≤3 row tail
+                    for (; ir0 < loopcnt; ir0++) {
+                        xb_vecN_2xf32 sumf_v = AE_ZERON_2XF32();
+                        xb_f16 *wp = (xb_f16 *)(src0_row + ir0 * nb01);
+
+                        for (int b = 0; b < 2; b++) {
+                            xb_f16 wh;
+                            xb_f16_loadip(wh, wp, 2);
+                            xtfloat dx_fs = AE_CVTF32F16(wh);
+
+                            xb_vec2Nx8 w0;
+                            AE_L2U2NX8_XP(w0, (xb_vec2Nx8 *)wp, 32);
+
+                            xb_vec2Nx8 ww0 = w0, ww1 = zeros, ww2 = zeros, ww3 = zeros;
+                            AE_INTL64Q2NX8(ww3, ww2, ww1, ww0,
+                                            ww3, ww2, ww1, ww0);
+
+                            int off = b * 4;
+                            xb_vec2Nx32w wvt = AE_ZERO2NX32W();
+                            AE_MMA8A8OA4X8X8HT(wvt, ww0, yi[off+0], yi[off+0]);
+                            AE_MMA8A8OA4X8X8HT(wvt, ww1, yi[off+1], yi[off+1]);
+                            AE_MMA8A8OA4X8X8HT(wvt, ww2, yi[off+2], yi[off+2]);
+                            AE_MMA8A8OA4X8X8HT(wvt, ww3, yi[off+3], yi[off+3]);
+
+                            xb_vecN_2x32v r01_lo, r01_hi;
+                            AE_MOV2VWL(r01_hi, r01_lo, wvt);
+                            xb_vecN_2xf32 frow = AE_FLOATN_2X32(r01_lo, 0);
+                            xb_vecN_2xf32 scv = AE_MOVN_2XF32_FROMF32(XT_MUL_S(dx_fs, dy_scale[b]));
+                            AE_MULAN_2XF32(sumf_v, frow, scv);
+                        }
+
+                        xtfloat_storexp(AE_MOVF32_FROMN_2XF32(sumf_v), pout, 4);
+                    }
+                }
+                else {
+                    int ir0;
+                    for (ir0 = iir0; ir0 + 4 <= loopcnt; ir0 += 4) {
+                        xb_vecN_2xf32 sumf_v0 = AE_ZERON_2XF32();
+                        xb_vecN_2xf32 sumf_v1 = AE_ZERON_2XF32();
+                        xb_vecN_2xf32 sumf_v2 = AE_ZERON_2XF32();
+                        xb_vecN_2xf32 sumf_v3 = AE_ZERON_2XF32();
+
+                        xb_f16 *wp[4];
+                        for (int r = 0; r < 4; r++)
+                            wp[r] = (xb_f16 *)(src0_row + (ir0 + r) * nb01);
+                        xb_f16 *y_ptr = (xb_f16 *)src1_col;
+
+                        for (int ib = 0; ib < nb; ib++) {
+                            xb_f16 yh;
+                            xb_f16_loadip(yh, y_ptr, 2);
+                            xtfloat dy = AE_CVTF32F16(yh);
+                            xb_vec2Nx8 yraw;
+                            AE_L2U2NX8_XP(yraw, (xb_vec2Nx8 *)y_ptr, 32);
+
+                            xb_vec2Nx8 yi0 = yraw, yi1 = yraw;
+                            xb_vec2Nx8 yi2 = yraw, yi3 = yraw;
+                            AE_INTL64Q2NX8(yi3, yi2, yi1, yi0,
+                                            yi3, yi2, yi1, yi0);
+
+                            xtfloat dx_f[4];
+                            xb_vec2Nx8 w[4];
+                            for (int r = 0; r < 4; r++) {
+                                xb_f16 wh;
+                                xb_f16_loadip(wh, wp[r], 2);
+                                dx_f[r] = AE_CVTF32F16(wh);
+                                AE_L2U2NX8_XP(w[r], (xb_vec2Nx8 *)wp[r], 32);
+                            }
+
+                            AE_INTL64Q2NX8(w[3], w[2], w[1], w[0],
+                                            w[3], w[2], w[1], w[0]);
+
+                            xb_vec2Nx32w wvt = AE_ZERO2NX32W();
+                            AE_MMA8A8OA4X8X8HT(wvt, w[0], yi0, yi0);
+                            AE_MMA8A8OA4X8X8HT(wvt, w[1], yi1, yi1);
+                            AE_MMA8A8OA4X8X8HT(wvt, w[2], yi2, yi2);
+                            AE_MMA8A8OA4X8X8HT(wvt, w[3], yi3, yi3);
+
+                            xb_vecN_2x32v r01_lo, r01_hi, r23_lo, r23_hi;
+                            AE_MOV2VWL(r01_hi, r01_lo, wvt);
+                            AE_MOV2VWH(r23_hi, r23_lo, wvt);
+
+                            xb_vecN_2xf32 frow0 = AE_FLOATN_2X32(r01_lo, 0);
+                            xb_vecN_2xf32 frow1 = AE_FLOATN_2X32(r01_hi, 0);
+                            xb_vecN_2xf32 frow2 = AE_FLOATN_2X32(r23_lo, 0);
+                            xb_vecN_2xf32 frow3 = AE_FLOATN_2X32(r23_hi, 0);
+
+                            xb_vecN_2xf32 scv0 = AE_MOVN_2XF32_FROMF32(XT_MUL_S(dx_f[0], dy));
+                            xb_vecN_2xf32 scv1 = AE_MOVN_2XF32_FROMF32(XT_MUL_S(dx_f[1], dy));
+                            xb_vecN_2xf32 scv2 = AE_MOVN_2XF32_FROMF32(XT_MUL_S(dx_f[2], dy));
+                            xb_vecN_2xf32 scv3 = AE_MOVN_2XF32_FROMF32(XT_MUL_S(dx_f[3], dy));
+
+                            AE_MULAN_2XF32(sumf_v0, frow0, scv0);
+                            AE_MULAN_2XF32(sumf_v1, frow1, scv1);
+                            AE_MULAN_2XF32(sumf_v2, frow2, scv2);
+                            AE_MULAN_2XF32(sumf_v3, frow3, scv3);
+                        }
+
+                        xtfloat_storexp(AE_MOVF32_FROMN_2XF32(sumf_v0), pout, 4);
+                        xtfloat_storexp(AE_MOVF32_FROMN_2XF32(sumf_v1), pout, 4);
+                        xtfloat_storexp(AE_MOVF32_FROMN_2XF32(sumf_v2), pout, 4);
+                        xtfloat_storexp(AE_MOVF32_FROMN_2XF32(sumf_v3), pout, 4);
+                    }
+
+                    // ≤3 row tail
+                    for (; ir0 < loopcnt; ir0++) {
+                        xb_vecN_2xf32 sumf_v = AE_ZERON_2XF32();
+                        xb_f16 *x_ptr = (xb_f16 *)(src0_row + ir0 * nb01);
+                        xb_f16 *y_ptr = (xb_f16 *)src1_col;
+
+                        for (int ib = 0; ib < nb; ib++) {
+                            xb_f16 yh;
+                            xb_f16_loadip(yh, y_ptr, 2);
+                            xtfloat dy = AE_CVTF32F16(yh);
+                            xb_vec2Nx8 yraw;
+                            AE_L2U2NX8_XP(yraw, (xb_vec2Nx8 *)y_ptr, 32);
+
+                            xb_vec2Nx8 yi0 = yraw, yi1 = yraw;
+                            xb_vec2Nx8 yi2 = yraw, yi3 = yraw;
+                            AE_INTL64Q2NX8(yi3, yi2, yi1, yi0,
+                                            yi3, yi2, yi1, yi0);
+
+                            xb_f16 xh;
+                            xb_f16_loadip(xh, x_ptr, 2);
+                            xtfloat dx_f = AE_CVTF32F16(xh);
+                            xb_vec2Nx8 xraw;
+                            AE_L2U2NX8_XP(xraw, (xb_vec2Nx8 *)x_ptr, 32);
+
+                            xb_vec2Nx8 ww0 = xraw, ww1 = zeros, ww2 = zeros, ww3 = zeros;
+                            AE_INTL64Q2NX8(ww3, ww2, ww1, ww0,
+                                            ww3, ww2, ww1, ww0);
+
+                            xb_vec2Nx32w wvt = AE_ZERO2NX32W();
+                            AE_MMA8A8OA4X8X8HT(wvt, ww0, yi0, yi0);
+                            AE_MMA8A8OA4X8X8HT(wvt, ww1, yi1, yi1);
+                            AE_MMA8A8OA4X8X8HT(wvt, ww2, yi2, yi2);
+                            AE_MMA8A8OA4X8X8HT(wvt, ww3, yi3, yi3);
+
+                            xb_vecN_2x32v r01_lo, r01_hi;
+                            AE_MOV2VWL(r01_hi, r01_lo, wvt);
+                            xb_vecN_2xf32 frow = AE_FLOATN_2X32(r01_lo, 0);
+                            xb_vecN_2xf32 scv = AE_MOVN_2XF32_FROMF32(XT_MUL_S(dx_f, dy));
+                            AE_MULAN_2XF32(sumf_v, frow, scv);
+                        }
+
+                        xtfloat_storexp(AE_MOVF32_FROMN_2XF32(sumf_v), pout, 4);
+                    }
+                }
+
+#ifdef HIFIIQ_MATMUL_Q8_V2_DEBUG
+                // Scalar reference comparison
+                {
+                    int n_elem_d = MIN(iir0 + blck_0, ir0_end) - iir0;
+                    float tmp_ref_d[32];
+                    for (int _ir0 = iir0; _ir0 < iir0 + n_elem_d; _ir0++) {
+                        float sumf_d = 0.0f;
+                        const ggml_fp16_t *x_d = (const ggml_fp16_t *)(src0_row + _ir0 * nb01);
+                        const ggml_fp16_t *y_d = (const ggml_fp16_t *)src1_col;
+                        for (int ib = 0; ib < ne00 / QK8_0; ib++) {
+                            float sc_d = GGML_FP16_TO_FP32(*x_d) * GGML_FP16_TO_FP32(*y_d);
+                            x_d++; y_d++;
+                            const int8_t *xq = (const int8_t *)x_d;
+                            const int8_t *yq = (const int8_t *)y_d;
+                            int32_t sumi_d = 0;
+                            for (int j = 0; j < QK8_0; j++)
+                                sumi_d += (int32_t)xq[j] * (int32_t)yq[j];
+                            x_d = (const ggml_fp16_t *)(xq + QK8_0);
+                            y_d = (const ggml_fp16_t *)(yq + QK8_0);
+                            sumf_d += (float)sumi_d * sc_d;
+                        }
+                        tmp_ref_d[_ir0 - iir0] = sumf_d;
+                    }
+                    int dbg_mis_count = 0;
+                    for (int k = 0; k < n_elem_d; k++) {
+                        if (tmp[k] != tmp_ref_d[k] && dbg_mis_count < 16) {
+                            printf("[Q8_V2_DBG] MISMATCH ir0=%d ir1=%d | ISA=%.6f REF=%.6f ne00=%d\n",
+                                   iir0 + k, ir1, tmp[k], tmp_ref_d[k], (int)ne00);
+                            dbg_mis_count++;
+                        }
+                    }
+                }
+#endif
+                memcpy(&dst_col[iir0], tmp, memcpy_size);
+
+            } /* end ir1 loop */
+        } /* end iir0 loop */
+    } /* end iir1 loop */
+}
+#endif /* HIFIIQ_MATMUL_Q8_V2 */
+#endif
+#if defined(HIFI5S_OPT)
+static inline void ggml_compute_forward_mul_mat_one_chunk_q8(
+    const struct ggml_compute_params * params,
+    struct ggml_tensor * dst,
+    const enum ggml_type vec_dot_type,
+    const int num_rows_per_vec_dot,
+    const int ir0_start,
+    const int ir0_end,
+    const int ir1_start,
+    const int ir1_end) {
+
+    const struct ggml_tensor * src0 = dst->src[0];
+    const struct ggml_tensor * src1 = dst->src[1];
+
+    GGML_TENSOR_BINARY_OP_LOCALS
+
+    const bool src1_cont = ggml_is_contiguous(src1);
+
+    //ggml_vec_dot_t const vec_dot      = type_traits_cpu[type].vec_dot;
+    //enum ggml_type const vec_dot_type = type_traits_cpu[type].vec_dot_type;
+
+    // broadcast factors
+    const int r2 = ne12 / ne02;
+    const int r3 = ne13 / ne03;
+
+    //printf("ir0_start = %6lld, ir0_end = %6lld, ir1_start = %6lld, ir1_end = %6lld\n", ir0_start, ir0_end, ir1_start, ir1_end);
+
+    // threads with no work simply yield (not sure if it helps)
+    if (ir0_start >= ir0_end || ir1_start >= ir1_end) {
+        return;
+    }
+
+    bool wdata_is_src1 = src1->type == vec_dot_type;
+    //const void * wdata = (src1->type == vec_dot_type) ? src1->data : params->wdata;
+    const void * wdata = wdata_is_src1 ? src1->data : params->wdata;
+    const size_t row_size = ggml_row_size(vec_dot_type, ne10);
+
+    assert(ne12 % ne02 == 0);
+    assert(ne13 % ne03 == 0);
+
+    // block-tiling attempt
+    const int blck_0 = 16;
+    const int blck_1 = 16;
+
+    //const size_t src1_col_stride = src1_cont || src1->type != vec_dot_type ? row_size : nb11;
+    const size_t src1_col_stride = src1_cont || !wdata_is_src1 ? row_size : nb11;
+
+    // attempt to reduce false-sharing (does not seem to make a difference)
+    // 16 * 2, accounting for mmla kernels
+    float tmp[32];
+
+    int ne12ne1 = (ne12 * ne1);
+    float byr3 = 1.0f / r3;
+    float byr2 = 1.0f / r2;
+    int nb1bynb0 = nb1/nb0;
+    float byne12ne1 = 1.0f / (ne12 * ne1);
+    float byne1 = 1.0f / ne1;
+
+    for (int iir1 = ir1_start; iir1 < ir1_end; iir1 += blck_1) {
+        for (int iir0 = ir0_start; iir0 < ir0_end; iir0 += blck_0) {
+            for (int ir1 = iir1; ir1 < iir1 + blck_1 && ir1 < ir1_end; ir1 += 1) {
+                const int i13 = (ir1 * byne12ne1); /// (ne12ne1));
+                const int i12 = (ir1 - i13 * ne12ne1) * byne1; /// ne1;
+                const int i11 = (ir1 - i13 * ne12ne1 - i12 * ne1);
+
+                // broadcast src0 into src1
+                const int i03 = i13 * byr3; /// r3;
+                const int i02 = i12 * byr2; /// r2;
+
+                //const int i1 = i11;
+                //const int i2 = i12;
+                //const int i3 = i13;
+
+                const char * src0_row = (const char*)src0->data + (0 + i02 * nb02 + i03 * nb03);
+
+                // desc: when src1 is not a contiguous memory block we have to calculate the offset using the strides
+                //       if it is, then we have either copied the data to params->wdata and made it contiguous or we are using
+                //       the original src1 data pointer, so we should index using the indices directly
+                // TODO: this is a bit of a hack, we should probably have a better way to handle this
+                const char * src1_col = (const char*)wdata +
+                    (src1_cont || !wdata_is_src1 /*src1->type != vec_dot_type*/
+                        ? (i11 + i12 * ne11 + i13 * ne12 * ne11) * row_size
+                        : (i11 * nb11 + i12 * nb12 + i13 * nb13));
+                //float * dst_col = (float*)((char*)dst->data + (i1 * nb1 + i2 * nb2 + i3 * nb3));
+                float * dst_col = (float*)((char*)dst->data + (i11 * nb1 + i12 * nb2 + i13 * nb3));
+
+                //for (int64_t ir0 = iir0; ir0 < iir0 + blck_0 && ir0 < ir0_end; ++ir0) {
+                //    vec_dot(ne00, &dst_col[ir0], src0_row + ir0*nb01, src1_col);
+                //}
+                //int nb1bynb0 = nb1/nb0;
+       		    int memcpy_size = (MIN(iir0 + blck_0, ir0_end) - iir0) * sizeof(float);
+                if(ne00 == 64)
+                {
+                    int ib;
+                    const block_q8_0 * restrict y = (const block_q8_0 *)src1_col;
+                    int inc =  sizeof(block_q8_0);
+                    xtfloat *pout = tmp;
+                    int loopcnt = ((iir0 + blck_0) < ir0_end) ? (iir0 + blck_0) : ir0_end;
+                    xthalf *y_d = (xthalf *)y;
+                    ae_int8x8 vec_y[8];
+                    ae_valignx2 align_yqs;
+                    xthalf inp2, inp4;
+                    xtfloat inp2_f, inp4_f;
+                    
+                    xthalf_loadip(inp2, y_d, 2);
+                    inp2_f = xthalf_rtor_xtfloat(inp2);
+                    align_yqs = AE_LA128_PP((ae_int8x16 *)y_d);
+                    AE_LA8X8X2_IP(vec_y[0], vec_y[1], align_yqs, (ae_int8x16 *)y_d);
+                    AE_LA8X8X2_IP(vec_y[2], vec_y[3], align_yqs, (ae_int8x16 *)y_d);
+                    xthalf_loadip(inp4, y_d, 2);
+                    inp4_f = xthalf_rtor_xtfloat(inp4);
+                    align_yqs = AE_LA128_PP((ae_int8x16 *)y_d);
+                    AE_LA8X8X2_IP(vec_y[4], vec_y[5], align_yqs, (ae_int8x16 *)y_d);
+                    AE_LA8X8X2_IP(vec_y[6], vec_y[7], align_yqs, (ae_int8x16 *)y_d);
+
+                    xthalf *x_d = (xthalf*)(src0_row + iir0 * nb01);
+                    for (int ir0 = iir0; ir0 < loopcnt; ir0 += 1) 
+                    {
+                        ae_int8x8 vec_x[4];
+                        ae_int64 acc1, acc2, acc;
+                        ae_valignx2 align_xqs;
+                        xthalf inp1;
+                        xtfloat sumf, out1;
+
+                        xthalf_loadip(inp1, x_d, 2);
+                        align_xqs = AE_LA128_PP((ae_int8x16 *)x_d);
+                        out1 = MUL_S(xthalf_rtor_xtfloat(inp1), inp2_f);//xthalf_rtor_xtfloat(inp2));
+
+                        AE_LA8X8X2_IP(vec_x[0], vec_x[1], align_xqs, (ae_int8x16 *)x_d);
+                        AE_LA8X8X2_IP(vec_x[2], vec_x[3], align_xqs, (ae_int8x16 *)x_d);
+
+                        AE_MULZAAAA2Q8(acc1, acc2, vec_x[0], vec_y[0]);
+                        AE_MULAAAA2Q8(acc1, acc2, vec_x[1], vec_y[1]);
+                        AE_MULAAAA2Q8(acc1, acc2, vec_x[2], vec_y[2]);
+                        AE_MULAAAA2Q8(acc1, acc2, vec_x[3], vec_y[3]);
+                        acc = AE_ADD64(acc1, acc2);
+                        xtfloatx2 tmp = ae_int32x2_rtor_xtfloatx2(AE_MOVINT32X2_FROMINT64(acc));
+                        sumf = MUL_S(AE_MOVXTFLOAT_FROMXTFLOATX2(tmp), out1);
+                        xthalf_loadip(inp1, x_d, 2);
+                        align_xqs = AE_LA128_PP((ae_int8x16 *)x_d);
+                        AE_LA8X8X2_IP(vec_x[0], vec_x[1], align_xqs, (ae_int8x16 *)x_d);
+                        AE_LA8X8X2_IP(vec_x[2], vec_x[3], align_xqs, (ae_int8x16 *)x_d);
+
+                        out1 = MUL_S(xthalf_rtor_xtfloat(inp1), inp4_f);//xthalf_rtor_xtfloat(inp4));
+                        AE_MULZAAAA2Q8(acc1, acc2, vec_x[0], vec_y[4]);
+                        AE_MULAAAA2Q8(acc1, acc2, vec_x[1], vec_y[5]);
+                        AE_MULAAAA2Q8(acc1, acc2, vec_x[2], vec_y[6]);
+                        AE_MULAAAA2Q8(acc1, acc2, vec_x[3], vec_y[7]);
+                        acc = AE_ADD64(acc1, acc2);
+                        tmp = ae_int32x2_rtor_xtfloatx2(AE_MOVINT32X2_FROMINT64(acc));
+                        MADD_S(sumf, AE_MOVXTFLOAT_FROMXTFLOATX2(tmp), out1);
+
+                        xtfloat_storexp(sumf, pout, 1*4);
+                    }
+                }
+                else
+                {
+                    int ib;
+                    //const int qk = QK8_0;
+                    const int nb = ne00>>5; //Assuming qk = 32, n / qk;
+                    const block_q8_0 * restrict y = (const block_q8_0 *)src1_col;
+                    int inc =  sizeof(block_q8_0);
+                    xtfloat *pout = tmp;
+                    for (int ir0 = iir0; ir0 < iir0 + blck_0 && ir0 < ir0_end; ir0 += 1)
+                    {
+                        xtfloat sumf = 0;
+                        const block_q8_0 * restrict x = (const block_q8_0 *)(src0_row + ir0 * nb01);
+                        int sumi;
+                        xthalf *x_d = (xthalf *)x;
+                        xthalf *y_d = (xthalf *)y;
+                        ae_int8x8 vec_x[4], vec_y[4];
+                        ae_int8x8 *x_qs, *y_qs;
+                        ae_int64 acc1, acc2, acc;
+                        ae_valignx2 align_xqs, align_yqs;
+                        xthalf inp1, inp2;
+                        xtfloat out1;
+                        //#pragma nounroll
+                        #pragma ymemory(y_d)
+                        for (ib=0; ib < nb; ib++) {
+                            xthalf_loadip(inp1, x_d, 2);
+                            xthalf_loadip(inp2, y_d, 2);
+                            align_xqs = AE_LA128_PP((ae_int8x16 *)x_d);
+                            align_yqs = AE_LA128_PP((ae_int8x16 *)y_d);
+                            AE_LA8X8X2_IP(vec_x[0], vec_x[1], align_xqs, (ae_int8x16 *)x_d);
+                            AE_LA8X8X2_IP(vec_y[0], vec_y[1], align_yqs, (ae_int8x16 *)y_d);
+                            AE_LA8X8X2_IP(vec_x[2], vec_x[3], align_xqs, (ae_int8x16 *)x_d);
+                            AE_LA8X8X2_IP(vec_y[2], vec_y[3], align_yqs, (ae_int8x16 *)y_d);
+
+                            out1 = MUL_S(xthalf_rtor_xtfloat(inp1), xthalf_rtor_xtfloat(inp2));
+                            AE_MULZAAAA2Q8(acc1, acc2, vec_x[0], vec_y[0]);
+                            AE_MULAAAA2Q8(acc1, acc2, vec_x[1], vec_y[1]);
+                            AE_MULAAAA2Q8(acc1, acc2, vec_x[2], vec_y[2]);
+                            AE_MULAAAA2Q8(acc1, acc2, vec_x[3], vec_y[3]);
+                            acc = AE_ADD64(acc1, acc2);
+                            xtfloatx2 tmp = ae_int32x2_rtor_xtfloatx2(AE_MOVINT32X2_FROMINT64(acc));
+                            MADD_S(sumf, xtfloatx2_rtor_xtfloat(tmp), out1);
+                        }
+                    xtfloat_storexp(sumf, pout, 1*4);
+                    }
+                }
+
+                //for (int cn = 0; cn < 1; ++cn) {
+                    memcpy(&dst_col[iir0], tmp, memcpy_size);
+                //}
+            }
+        }
+    }
+}
+
+static inline void ggml_compute_forward_mul_mat_one_chunk(
+    const struct ggml_compute_params * params,
+    struct ggml_tensor * dst,
+    const enum ggml_type type,
+    const int num_rows_per_vec_dot,
+    const int ir0_start,
+    const int ir0_end,
+    const int ir1_start,
+    const int ir1_end) {
+
+    const struct ggml_tensor * src0 = dst->src[0];
+    const struct ggml_tensor * src1 = dst->src[1];
+
+    GGML_TENSOR_BINARY_OP_LOCALS
+
+    const bool src1_cont = ggml_is_contiguous(src1);
+
+    ggml_vec_dot_t const vec_dot      = type_traits_cpu[type].vec_dot;
+    enum ggml_type const vec_dot_type = type_traits_cpu[type].vec_dot_type;
+
+    // broadcast factors
+    const int r2 = ne12 / ne02;
+    const int r3 = ne13 / ne03;
+
+    //printf("ir0_start = %6lld, ir0_end = %6lld, ir1_start = %6lld, ir1_end = %6lld\n", ir0_start, ir0_end, ir1_start, ir1_end);
+
+    // threads with no work simply yield (not sure if it helps)
+    if (ir0_start >= ir0_end || ir1_start >= ir1_end) {
+        return;
+    }
+
+    const void * wdata = (src1->type == vec_dot_type) ? src1->data : params->wdata;
+    const size_t row_size = ggml_row_size(vec_dot_type, ne10);
+
+    assert(ne12 % ne02 == 0);
+    assert(ne13 % ne03 == 0);
+
+    // block-tiling attempt
+    const int blck_0 = 16;
+    const int blck_1 = 16;
+
+    const size_t src1_col_stride = src1_cont || src1->type != vec_dot_type ? row_size : nb11;
+
+    // attempt to reduce false-sharing (does not seem to make a difference)
+    // 16 * 2, accounting for mmla kernels
+    float tmp[32];
+
+    int ne12ne1 = (ne12 * ne1);
+    for (int iir1 = ir1_start; iir1 < ir1_end; iir1 += blck_1) {
+        for (int iir0 = ir0_start; iir0 < ir0_end; iir0 += blck_0) {
+            for (int ir1 = iir1; ir1 < iir1 + blck_1 && ir1 < ir1_end; ir1 += num_rows_per_vec_dot) {
+                const int i13 = (ir1 / (ne12ne1));
+                const int i12 = (ir1 - i13 * ne12ne1) / ne1;
+                const int i11 = (ir1 - i13 * ne12ne1 - i12 * ne1);
+
+                // broadcast src0 into src1
+                const int i03 = i13 / r3;
+                const int i02 = i12 / r2;
+
+                const int i1 = i11;
+                const int i2 = i12;
+                const int i3 = i13;
+
+                const char * src0_row = (const char*)src0->data + (0 + i02 * nb02 + i03 * nb03);
+
+                // desc: when src1 is not a contiguous memory block we have to calculate the offset using the strides
+                //       if it is, then we have either copied the data to params->wdata and made it contiguous or we are using
+                //       the original src1 data pointer, so we should index using the indices directly
+                // TODO: this is a bit of a hack, we should probably have a better way to handle this
+                const char * src1_col = (const char*)wdata +
+                    (src1_cont || src1->type != vec_dot_type
+                        ? (i11 + i12 * ne11 + i13 * ne12 * ne11) * row_size
+                        : (i11 * nb11 + i12 * nb12 + i13 * nb13));
+                float * dst_col = (float*)((char*)dst->data + (i1 * nb1 + i2 * nb2 + i3 * nb3));
+
+                //for (int64_t ir0 = iir0; ir0 < iir0 + blck_0 && ir0 < ir0_end; ++ir0) {
+                //    vec_dot(ne00, &dst_col[ir0], src0_row + ir0*nb01, src1_col);
+                //}
+                int nb1bynb0 = nb1/nb0;
+       		    int memcpy_size = (MIN(iir0 + blck_0, ir0_end) - iir0) * sizeof(float);
+                if(type==GGML_TYPE_Q8_0 && ne00 == 64)
+                {
+                    int ib;
+                    const int qk = QK8_0;
+                    //const int nb = 2;//ne00>>5; //Assuming qk = 32, n / qk;
+                    const block_q8_0 * restrict y = (const block_q8_0 *)src1_col;
+                    int inc =  sizeof(block_q8_0);
+                    xtfloat *pout = tmp;
+                    int loopcnt = ((iir0 + blck_0) < ir0_end) ? (iir0 + blck_0) : ir0_end;
+                    xthalf * restrict y_d = (xthalf *)y;
+                    ae_int8x8 vec_y0, vec_y1, vec_y2, vec_y3;
+                    ae_int8x8 vec_y4, vec_y5, vec_y6, vec_y7;
+                    ae_valignx2 align_yqs;
+                    xthalf inp2, inp4;
+                    xtfloat inp2_f, inp4_f;
+                    
+                    xthalf_loadip(inp2, y_d, 2);
+                    inp2_f = xthalf_rtor_xtfloat(inp2);
+                    align_yqs = AE_LA128_PP((ae_int8x16 *)y_d);
+                    AE_LA8X8X2_IP(vec_y0, vec_y1, align_yqs, (ae_int8x16 *)y_d);
+                    AE_LA8X8X2_IP(vec_y2, vec_y3, align_yqs, (ae_int8x16 *)y_d);
+                    xthalf_loadip(inp4, y_d, 2);
+                    inp4_f = xthalf_rtor_xtfloat(inp4);
+                    align_yqs = AE_LA128_PP((ae_int8x16 *)y_d);
+                    AE_LA8X8X2_IP(vec_y4, vec_y5, align_yqs, (ae_int8x16 *)y_d);
+                    AE_LA8X8X2_IP(vec_y6, vec_y7, align_yqs, (ae_int8x16 *)y_d);
+                    for (int ir0 = iir0; ir0 < loopcnt; ir0 += num_rows_per_vec_dot) 
+                    {
+                        xtfloat sumf;
+                        const block_q8_0 * restrict x = (const block_q8_0 *)(src0_row + ir0 * nb01);
+                        xthalf *x_d = (xthalf *)x;
+                        ae_int8x8 vec_x0, vec_x1, vec_x2, vec_x3;
+                        ae_int64 acc1, acc2, acc;
+                        ae_valignx2 align_xqs;
+                        xthalf inp1;
+                        xtfloat out1;
+
+                        xthalf_loadip(inp1, x_d, 2);
+                        align_xqs = AE_LA128_PP((ae_int8x16 *)x_d);
+                        AE_LA8X8X2_IP(vec_x0, vec_x1, align_xqs, (ae_int8x16 *)x_d);
+                        AE_LA8X8X2_IP(vec_x2, vec_x3, align_xqs, (ae_int8x16 *)x_d);
+
+                        out1 = MUL_S(xthalf_rtor_xtfloat(inp1), inp2_f);//xthalf_rtor_xtfloat(inp2));
+                        AE_MULZAAAA2Q8(acc1, acc2, vec_x0, vec_y0);
+                        AE_MULAAAA2Q8(acc1, acc2, vec_x1, vec_y1);
+                        AE_MULAAAA2Q8(acc1, acc2, vec_x2, vec_y2);
+                        AE_MULAAAA2Q8(acc1, acc2, vec_x3, vec_y3);
+                        acc = AE_ADD64(acc1, acc2);
+                        xtfloatx2 tmp = ae_int32x2_rtor_xtfloatx2(AE_MOVINT32X2_FROMINT64(acc));
+                        //MADD_S(sumf, AE_MOVXTFLOAT_FROMXTFLOATX2(tmp), out1);
+                        sumf = MUL_S(AE_MOVXTFLOAT_FROMXTFLOATX2(tmp), out1);
+                        xthalf_loadip(inp1, x_d, 2);
+                        align_xqs = AE_LA128_PP((ae_int8x16 *)x_d);
+                        AE_LA8X8X2_IP(vec_x0, vec_x1, align_xqs, (ae_int8x16 *)x_d);
+                        AE_LA8X8X2_IP(vec_x2, vec_x3, align_xqs, (ae_int8x16 *)x_d);
+
+                        out1 = MUL_S(xthalf_rtor_xtfloat(inp1), inp4_f);//xthalf_rtor_xtfloat(inp4));
+                        AE_MULZAAAA2Q8(acc1, acc2, vec_x0, vec_y4);
+                        AE_MULAAAA2Q8(acc1, acc2, vec_x1, vec_y5);
+                        AE_MULAAAA2Q8(acc1, acc2, vec_x2, vec_y6);
+                        AE_MULAAAA2Q8(acc1, acc2, vec_x3, vec_y7);
+                        acc = AE_ADD64(acc1, acc2);
+                        tmp = ae_int32x2_rtor_xtfloatx2(AE_MOVINT32X2_FROMINT64(acc));
+                        MADD_S(sumf, AE_MOVXTFLOAT_FROMXTFLOATX2(tmp), out1);
+                        xtfloat_storexp(sumf, pout, num_rows_per_vec_dot*4);
+                    }
+                }
+                else if(type==GGML_TYPE_Q8_0)
+                {
+                    int ib;
+                    const int qk = QK8_0;
+                    const int nb = ne00>>5; //Assuming qk = 32, n / qk;
+                    const block_q8_0 * restrict y = (const block_q8_0 *)src1_col;
+                    int inc =  sizeof(block_q8_0);
+                    xtfloat *pout = tmp;
+                    for (int ir0 = iir0; ir0 < iir0 + blck_0 && ir0 < ir0_end; ir0 += num_rows_per_vec_dot)
+                    {
+                        xtfloat sumf = 0;
+                        const block_q8_0 * restrict x = (const block_q8_0 *)(src0_row + ir0 * nb01);
+                        int sumi;
+                        xthalf *x_d = (xthalf *)x;
+                        xthalf *y_d = (xthalf *)y;
+                        ae_int8x8 vec_x0, vec_y0, vec_x1, vec_y1;
+                        ae_int8x8 vec_x2, vec_y2, vec_x3, vec_y3;
+                        ae_int8x8 *x_qs, *y_qs;
+                        ae_int64 acc1, acc2, acc;
+                        ae_valignx2 align_xqs, align_yqs;
+                        xthalf inp1, inp2;
+                        xtfloat out1;
+                        //#pragma nounroll
+                        #pragma ymemory(y_d)
+                        for (ib=0; ib < nb; ib++) {
+                            xthalf_loadip(inp1, x_d, 2);
+                            xthalf_loadip(inp2, y_d, 2);
+                            align_xqs = AE_LA128_PP((ae_int8x16 *)x_d);
+                            align_yqs = AE_LA128_PP((ae_int8x16 *)y_d);
+                            AE_LA8X8X2_IP(vec_x0, vec_x1, align_xqs, (ae_int8x16 *)x_d);
+                            AE_LA8X8X2_IP(vec_y0, vec_y1, align_yqs, (ae_int8x16 *)y_d);
+                            AE_LA8X8X2_IP(vec_x2, vec_x3, align_xqs, (ae_int8x16 *)x_d);
+                            AE_LA8X8X2_IP(vec_y2, vec_y3, align_yqs, (ae_int8x16 *)y_d);
+
+                            out1 = MUL_S(xthalf_rtor_xtfloat(inp1), xthalf_rtor_xtfloat(inp2));
+                            AE_MULZAAAA2Q8(acc1, acc2, vec_x0, vec_y0);
+                            AE_MULAAAA2Q8(acc1, acc2, vec_x1, vec_y1);
+                            AE_MULAAAA2Q8(acc1, acc2, vec_x2, vec_y2);
+                            AE_MULAAAA2Q8(acc1, acc2, vec_x3, vec_y3);
+                            acc = AE_ADD64(acc1, acc2);
+                            xtfloatx2 tmp = ae_int32x2_rtor_xtfloatx2(AE_MOVINT32X2_FROMINT64(acc));
+                            MADD_S(sumf, xtfloatx2_rtor_xtfloat(tmp), out1);
+                        }
+                    xtfloat_storexp(sumf, pout, num_rows_per_vec_dot*4);
+                    }
+                }
+                else
+                {
+                    for (int ir0 = iir0; ir0 < iir0 + blck_0 && ir0 < ir0_end; ir0 += num_rows_per_vec_dot) {
+                        vec_dot(ne00, &tmp[ir0 - iir0], (num_rows_per_vec_dot > 1 ? 16 : 0), src0_row + ir0 * nb01, (num_rows_per_vec_dot > 1 ? nb01 : 0), src1_col, (num_rows_per_vec_dot > 1 ? src1_col_stride : 0), num_rows_per_vec_dot);
+                    }
+                }
+
+                for (int cn = 0; cn < num_rows_per_vec_dot; ++cn) {
+                    //xa_nn_memcpy(&dst_col[iir0 + cn * nb1bynb0], tmp + (cn * 16), memcpy_size);
+                    memcpy(&dst_col[iir0 + cn * nb1bynb0], tmp + (cn * 16), memcpy_size);
+                }
+            }
+        }
+    }
+}
+#endif
+
+#if defined(HIFI5S_OPT) || defined(HIFIIQ_MUL_MAT)
+static void ggml_compute_forward_mul_mat(
+        const struct ggml_compute_params * params,
+              struct ggml_tensor * dst) {
+
+    const struct ggml_tensor * src0 = dst->src[0];
+    const struct ggml_tensor * src1 = dst->src[1];
+
+    GGML_TENSOR_BINARY_OP_LOCALS
+
+    const int ith = params->ith;
+    const int nth = params->nth;
+
+    enum ggml_type           const vec_dot_type         = type_traits_cpu[src0->type].vec_dot_type;
+    ggml_from_float_t        const from_float           = type_traits_cpu[vec_dot_type].from_float;
+    int                  const vec_dot_num_rows         = type_traits_cpu[src0->type].nrows;
+
+    GGML_ASSERT(ne0 == ne01);
+    GGML_ASSERT(ne1 == ne11);
+    GGML_ASSERT(ne2 == ne12);
+    GGML_ASSERT(ne3 == ne13);
+
+    // we don't support permuted src0 or src1
+    GGML_ASSERT(nb00 == ggml_type_size(src0->type));
+    GGML_ASSERT(nb10 == ggml_type_size(src1->type));
+
+    // dst cannot be transposed or permuted
+    GGML_ASSERT(nb0 == sizeof(float));
+    GGML_ASSERT(nb0 <= nb1);
+    GGML_ASSERT(nb1 <= nb2);
+    GGML_ASSERT(nb2 <= nb3);
+
+    // nb01 >= nb00 - src0 is not transposed
+    //   compute by src0 rows
+
+    // TODO: extract to "extra_op"
+#if GGML_USE_LLAMAFILE
+    // broadcast factors
+    const int64_t r2 = ne12 / ne02
+    const int64_t r3 = ne13 / ne03;
+
+    const bool src1_cont = ggml_is_contiguous(src1);
+
+    if (src1_cont) {
+        for (int64_t i13 = 0; i13 < ne13; i13++)
+            for (int64_t i12 = 0; i12 < ne12; i12++)
+                if (!llamafile_sgemm(ne01, ne11, ne00/ggml_blck_size(src0->type),
+                                     (const char *)src0->data + i12/r2*nb02 + i13/r3*nb03,
+                                     nb01/ggml_type_size(src0->type),
+                                     (const char *)src1->data + i12*nb12 + i13*nb13,
+                                     nb11/ggml_type_size(src1->type),
+                                     (char *)dst->data + i12*nb2 + i13*nb3,
+                                     nb1/ggml_type_size(dst->type),
+                                     ith, nth,
+                                     src0->type,
+                                     src1->type,
+                                     dst->type))
+                    goto UseGgmlGemm1;
+        return;
+    }
+UseGgmlGemm1:;
+#endif
+
+    if (src1->type != vec_dot_type) {
+        char * wdata = params->wdata;
+
+        const size_t nbw1 = ggml_row_size(vec_dot_type, ne10);
+        const size_t nbw2 = nbw1*ne11;
+        const size_t nbw3 = nbw2*ne12;
+
+        assert(params->wsize >= ne13*nbw3);
+        GGML_ASSERT(src1->type == GGML_TYPE_F32);
+
+        for (int i13 = 0; i13 < ne13; ++i13) {
+            for (int i12 = 0; i12 < ne12; ++i12) {
+                for (int i11 = ith; i11 < ne11; i11 += nth) {
+                    from_float((float *)((char *) src1->data + i13*nb13 + i12*nb12 + i11*nb11),
+                               (void *)               (wdata + i13*nbw3 + i12*nbw2 + i11*nbw1),
+                                ne10);
+                }
+            }
+        }
+    }
+
+    if (ith == 0) {
+        // Every thread starts at ith, so the first unprocessed chunk is nth.  This save a bit of coordination right at the start.
+        atomic_store_explicit(&params->threadpool->current_chunk, nth, memory_order_relaxed);
+    }
+
+    ggml_barrier(params->threadpool);
+
+#if GGML_USE_LLAMAFILE
+    if (src1->type != vec_dot_type) {
+        const void* wdata = (src1->type == vec_dot_type) ? src1->data : params->wdata
+        const size_t row_size = ggml_row_size(vec_dot_type, ne10);
+
+        for (int64_t i13 = 0; i13 < ne13; i13++)
+            for (int64_t i12 = 0; i12 < ne12; i12++)
+                if (!llamafile_sgemm(ne01, ne11, ne00/ggml_blck_size(src0->type),
+                                     (const char *)src0->data + i12/r2*nb02 + i13/r3*nb03,
+                                     nb01/ggml_type_size(src0->type),
+                                     (const char *)wdata + (i12*ne11 + i13*ne12*ne11)*row_size,
+                                     row_size/ggml_type_size(vec_dot_type),
+                                     (char *)dst->data + i12*nb2 + i13*nb3,
+                                     nb1/ggml_type_size(dst->type),
+                                     ith, nth,
+                                     src0->type,
+                                     vec_dot_type,
+                                     dst->type))
+                    goto UseGgmlGemm2;
+        return;
+    }
+UseGgmlGemm2:;
+#endif
+
+    // This is the size of the first dimension of the result, so we can iterate that way. (see the ASSERT above, these are the same numbers)
+    const int nr0 = ne0;
+
+    // This is the size of the rest of the dimensions of the result
+    const int nr1 = ne1 * ne2 * ne3;
+
+    // Now select a reasonable chunk size.
+    int chunk_size = 16;
+
+    // We need to step up the size if it's small
+    if (nr0 == 1 || nr1 == 1) {
+        chunk_size = 64;
+    }
+
+    // distribute the work across the inner or outer loop based on which one is larger
+    // The number of chunks in the 0/1 dim.
+    // CEIL(nr0/chunk_size)
+    int nchunk0 = (nr0 + chunk_size - 1) / chunk_size;
+    int nchunk1 = (nr1 + chunk_size - 1) / chunk_size;
+
+    // If the chunking is poor for the number of threads on this setup, scrap the whole plan.  Re-chunk it by thread.
+    //   Also, chunking by thread was measured to have perform better on NUMA systems.  See https://github.com/ggerganov/llama.cpp/pull/6915
+    //   In theory, chunking should be just as useful on NUMA and non NUMA systems, but testing disagreed with that.
+    if (nchunk0 * nchunk1 < nth * 4 || ggml_is_numa()) {
+        // distribute the thread work across the inner or outer loop based on which one is larger
+        nchunk0 = nr0 > nr1 ? nth : 1; // parallelize by src0 rows
+        nchunk1 = nr0 > nr1 ? 1 : nth; // parallelize by src1 rows
+    }
+
+    // The number of elements in each chunk
+    const int dr0 = (nr0 + nchunk0 - 1) / nchunk0;
+    const int dr1 = (nr1 + nchunk1 - 1) / nchunk1;
+
+    // The first chunk comes from our thread_id, the rest will get auto-assigned.
+    int current_chunk = ith;
+
+    while (current_chunk < nchunk0 * nchunk1) {
+        const int ith0 = current_chunk % nchunk0;
+        const int ith1 = current_chunk / nchunk0;
+
+        const int ir0_start = dr0 * ith0;
+        const int ir0_end = MIN(ir0_start + dr0, nr0);
+
+        const int ir1_start = dr1 * ith1;
+        const int ir1_end = MIN(ir1_start + dr1, nr1);
+
+        // dot kernels can handle 1 row and col at a time, but mmla kernels can process 2 rows and cols
+        int num_rows_per_vec_dot = vec_dot_num_rows;
+
+#if 0 // num_rows_per_vec_dot = 1, except for ARM. So no need to check for ARM here, just check for the conditions that would cause problems with the mmla kernels. 
+        // these checks are needed to avoid crossing dim1 boundaries
+        // can be optimized, but the logic would become more complicated, so keeping it like this for simplicity
+        if ((nr0 % 2 != 0) || (ne11 % 2 != 0) || ((ir0_end - ir0_start) % 2 != 0) || ((ir1_end - ir1_start) % 2 != 0)) {
+            num_rows_per_vec_dot = 1;
+        }
+#endif
+
+/* add protection for iq and 5s */
+#if defined(HIFIIQ_MATMUL_Q8_V2) || defined(HIFI5S_OPT)
+        if(src0->type==GGML_TYPE_Q8_0) //this value is always 1 && num_rows_per_vec_dot == 1)
+            ggml_compute_forward_mul_mat_one_chunk_q8(params, dst, vec_dot_type, num_rows_per_vec_dot, ir0_start, ir0_end, ir1_start, ir1_end);
+        else
+#endif
+            ggml_compute_forward_mul_mat_one_chunk(params, dst, src0->type, num_rows_per_vec_dot, ir0_start, ir0_end, ir1_start, ir1_end);
+
+        if (nth >= nchunk0 * nchunk1) {
+            break;
+        }
+
+        current_chunk = atomic_fetch_add_explicit(&params->threadpool->current_chunk, 1, memory_order_relaxed);
+    }
+}
+#endif
 
 // ggml_compute_forward_mul_mat_id
 
@@ -12286,7 +13727,9 @@ static void ggml_compute_forward(struct ggml_compute_params * params, struct ggm
     }
 
     // extra_buffer op?
+#ifndef BARE_METAL_TEST
     if (ggml_cpu_extra_compute_forward(params, tensor)) return;
+#endif
 
     switch (tensor->op) {
         case GGML_OP_DUP:
@@ -12649,6 +14092,7 @@ static void ggml_compute_forward(struct ggml_compute_params * params, struct ggm
 }
 
 // Android's libc implementation "bionic" does not support setting affinity
+#ifndef BARE_METAL_TEST
 #if defined(__gnu_linux__)
 static void set_numa_thread_affinity(int thread_n) {
     if (!ggml_is_numa()) {
@@ -12715,6 +14159,12 @@ static void clear_numa_thread_affinity(void) {
 
     CPU_FREE(cpus);
 }
+#else
+// TODO: Windows etc.
+// (the linux implementation may also work on BSD, someone should test)
+static void set_numa_thread_affinity(int thread_n) { UNUSED(thread_n);  }
+static void clear_numa_thread_affinity(void) {}
+#endif
 #else
 // TODO: Windows etc.
 // (the linux implementation may also work on BSD, someone should test)
@@ -13037,7 +14487,7 @@ static bool ggml_thread_apply_priority(int32_t prio) {
     return true;
 }
 
-#elif defined(__gnu_linux__)
+#elif defined(__gnu_linux__) && !defined(BARE_METAL_TEST)
 // TODO: this may not work on BSD, to be verified
 
 static bool ggml_thread_apply_affinity(const bool * mask) {
@@ -13153,9 +14603,11 @@ void ggml_threadpool_free(struct ggml_threadpool* threadpool) {
     ggml_mutex_unlock(&threadpool->mutex);
 
     for (int j = 1; j < n_threads; j++) {
+#ifndef BARE_METAL_TEST
         int32_t rc = ggml_thread_join(workers[j].thrd, NULL);
         GGML_ASSERT(rc == GGML_EXIT_SUCCESS || rc == GGML_EXIT_ABORTED);
         UNUSED(rc);
+#endif
     }
 
     ggml_mutex_destroy(&threadpool->mutex);
@@ -13235,7 +14687,11 @@ struct ggml_cplan ggml_graph_plan(
 
         size_t cur = 0;
 
+#ifndef BARE_METAL_TEST
         if (!ggml_cpu_extra_work_size(n_threads, node, &cur)) {
+#else
+	if(1) {
+#endif
 
             switch (node->op) {
                 case GGML_OP_CPY:
@@ -13405,16 +14861,23 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
         /*.threadpool=*/ tp,
     };
 
+#ifndef BARE_METAL_TEST
     for (int node_n = 0; node_n < cgraph->n_nodes && !tp->abort; node_n++) {
+#else
+    for (int node_n = 0; node_n < cgraph->n_nodes; node_n++){
+#endif
         struct ggml_tensor * node = cgraph->nodes[node_n];
 
         ggml_compute_forward(&params, node);
 
+
+#ifndef BARE_METAL_TEST
         if (state->ith == 0 && cplan->abort_callback &&
                 cplan->abort_callback(cplan->abort_callback_data)) {
             tp->abort = true;
             tp->ec    = GGML_STATUS_ABORTED;
         }
+#endif
 
         ggml_barrier(state->threadpool);
     }
@@ -13616,10 +15079,12 @@ static struct ggml_threadpool * ggml_threadpool_new_impl(
     int32_t cpumask_iter = 0;
 
     for (int j = 1; j < tpp->n_threads; j++) {
+#ifndef BARE_METAL_TEST
         ggml_thread_cpumask_next(tpp->cpumask, workers[j].cpumask, tpp->strict_cpu, &cpumask_iter);
 
         int32_t rc = ggml_thread_create(&workers[j].thrd, NULL, ggml_graph_compute_secondary_thread, &workers[j]);
         GGML_ASSERT(rc == 0);
+#endif
     }
 
     ggml_thread_cpumask_next(tpp->cpumask, workers[0].cpumask, tpp->strict_cpu, &cpumask_iter);
