@@ -25,19 +25,15 @@
 
 #include "xtensa_hifi.h"
 
-#if defined(HIFI5S_OPT) || defined(HIFIIQ_OPT)
-#if XCHAL_HAVE_HIFIN //for HiFi iQ
-#include <xtensa/tie/xt_hifin.h>
-#else
+#if defined(HIFI5S_OPT)
 #include <xtensa/tie/xt_hifi2.h>
-#endif
 #include <sys/times.h>
 #include <xtensa/hal.h>
 #include <xtensa/sim.h>
 #endif
 #define TOKENS_DECODE 16
 
-#if defined(HIFI5S_OPT) || defined(HIFIIQ_OPT)
+#if defined(HIFI5S_OPT)
 struct  tms full_timestart[TOKENS_DECODE], full_timestop[TOKENS_DECODE];
 #endif
 
@@ -251,11 +247,11 @@ int main(int argc, char ** argv) {
     int n_decode = 0;
     llama_token new_token_id;
 
-#if defined(HIFI5S_OPT) || defined(HIFIIQ_OPT)
+#if defined(HIFI5S_OPT)
     xt_iss_client_command("all", "enable");
 #endif
     for (int n_pos = 0; n_pos + batch.n_tokens < n_prompt + n_predict; ) {
-#if defined(HIFI5S_OPT) || defined(HIFIIQ_OPT)
+#if defined(HIFI5S_OPT)
         times(&full_timestart[n_decode]);
 #endif
         // evaluate the current batch with the transformer model
@@ -263,7 +259,7 @@ int main(int argc, char ** argv) {
             fprintf(stderr, "%s : failed to eval, return code %d\n", __func__, 1);
             return 1;
         }
-#if defined(HIFI5S_OPT) || defined(HIFIIQ_OPT)
+#if defined(HIFI5S_OPT)
         times(&full_timestop[n_decode]);
 #endif
 
@@ -295,7 +291,7 @@ int main(int argc, char ** argv) {
         }
     }
 
-#if defined(HIFI5S_OPT) || defined(HIFIIQ_OPT)
+#if defined(HIFI5S_OPT)
     xt_iss_client_command("all", "disable");
 #endif
 
@@ -305,7 +301,7 @@ int main(int argc, char ** argv) {
     printf("\n**** decode is completed ****\n");
     fflush(stdout);
 
-#if !defined (HIFI5S_OPT) && !defined(HIFIIQ_OPT)
+#if !defined (HIFI5S_OPT)
     fprintf(stderr, "\n%s: decoded %d tokens in %.2f s, speed: %.2f t/s\n",
             __func__, n_decode, (t_main_end - t_main_start) / 1000000.0f, n_decode / ((t_main_end - t_main_start) / 1000000.0f));
 
@@ -314,7 +310,7 @@ int main(int argc, char ** argv) {
     llama_perf_context_print(ctx);
     fprintf(stderr, "\n");
 #else
-	unsigned long long avg_cycles, max_cycles=0, total_cycles=0;
+    unsigned long long avg_cycles, max_cycles=0, total_cycles=0;
     unsigned int max_frame=0;
     unsigned long full_cycles;   // unsigned long avoids signed 32-bit clock_t overflow
     unsigned int cnt;
@@ -328,13 +324,27 @@ int main(int argc, char ** argv) {
     }
     // Guard against divide-by-zero when only 1 or fewer tokens were decoded
     avg_cycles = (n_decode > 1) ? total_cycles/(n_decode-1) : 0;
+
     fprintf(stdout, "\n%s: decoded %d tokens\n", __func__, n_decode);
-    fprintf(stdout, "%lld cycles to first output token (includes prompt processing for %d prompt tokens)\n", (long long int) ((unsigned long)full_timestop[0].tms_utime - (unsigned long)full_timestart[0].tms_utime), n_prompt);
-    fprintf(stdout, "%llu cycles to decode subsequent %d output tokens\n", total_cycles, n_decode-1);
-    fprintf(stdout, "%llu avg decode cycles per token\n", avg_cycles);
-    fprintf(stdout, "%llu max decode cycles at token %u\n", max_cycles, max_frame);
-    fprintf(stdout, "%llu cycles to decode last token\n", (unsigned long long)full_cycles);
-    
+    printf("\n");
+    long long int prefill_cycles = (long long int) ((unsigned long)full_timestop[0].tms_utime - (unsigned long)full_timestart[0].tms_utime);
+    printf("============================================================\n");
+    printf("                DETAILED CYCLES REPORT\n");
+    printf("============================================================\n");
+    fprintf(stdout, "cycles to first output token                   : %10lld\n", prefill_cycles);
+    fprintf(stdout, "(aka prefill cycles: includes prompt processing for %d prompt tokens)\n", n_prompt);
+    fprintf(stdout, "cycles to decode subsequent %d output tokens   : %10llu\n", n_decode-1, total_cycles);
+    fprintf(stdout, "prefill cycles/token                           : %10lld\n", prefill_cycles/n_prompt);
+    fprintf(stdout, "avg decode cycles/token                        : %10llu\n", avg_cycles);
+
+    printf("\n");
+    printf("============================================================\n");
+    printf("                PERFORMANCE SUMMARY\n");
+    printf("============================================================\n");
+    fprintf(stdout, "TTFT @1 GHz DSP                : %.4f sec (for decoding %d prompt tokens)\n", (float)(prefill_cycles)/(float)(1e9), n_prompt);
+    fprintf(stdout, "(TTFT => Time To First Token)\n");
+    fprintf(stdout, "decode tokens/sec @ 1GHz DSP   : %.2f\n", (float)(1e9)/(float)avg_cycles);
+
     fprintf(stdout, "\n%d threads used\n", GGML_DEFAULT_N_THREADS);
 #endif
 
